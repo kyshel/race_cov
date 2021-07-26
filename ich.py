@@ -1,6 +1,6 @@
 
 # %% introduction
-# IMC means image classification hammers, used for imgae classification task.
+# IMC means image classification hammer, used for imgae classification task.
 # Developed in vscode with interactive features
 
 '''  steps
@@ -215,6 +215,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--placeholder', type=str,
                     default='blank', help='initial weights path')
 opt = parser.parse_args(args=[])
+
 opt.batch = 16
 opt.split = 0.8
 opt.workers = 2
@@ -276,7 +277,7 @@ print('Model loaded.')
 
 # %% train
 
-logger.info('Start training for {} epochs...'.format(epochs))
+logger.info('Starting training for {} epochs...'.format(epochs))
 since = time.time()
 best_model_wts = copy.deepcopy(model.state_dict())
 best_acc = 0.0
@@ -310,7 +311,7 @@ for epoch in range(epochs):
         
 
         pbar = tqdm(loader,
-            file=sys.stdout,
+            # file=sys.stdout,
             leave=True,
             bar_format='{l_bar}{bar:3}{r_bar}{bar:-10b}',
             total=len(loader), mininterval=1,)
@@ -362,7 +363,7 @@ for epoch in range(epochs):
         if phase == 'train':
             scheduler.step()
         else:
-            logging.info('\n'+s)
+            logging.info(s)
 
         epoch_loss = running_loss / dataset_sizes[phase]
         epoch_acc = running_corrects.double() / dataset_sizes[phase]
@@ -383,13 +384,12 @@ for epoch in range(epochs):
     # end epoch -----------------------------
 
 time_elapsed = time.time() - since
-print('Training complete in {:.0f}m {:.0f}s'.format(
-    time_elapsed // 60, time_elapsed % 60))
+print('{} epochs complete in {:.0f}m {:.0f}s \n'.format(
+    epochs, time_elapsed // 60, time_elapsed % 60))
 print('Best val Acc: {:4f}'.format(best_acc))
 
 # load best model weights
 model.load_state_dict(best_model_wts)
-
 
 
 PATH = '/content/_emoji/04model/v5_ich_{}.pth'.format(ax.nowtime())
