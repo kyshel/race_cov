@@ -1,24 +1,25 @@
 
 # %% introduction
-# IMC means image classification hammer, used for imgae classification task.
+# ich means Image Classification Hammer, used for imgae classification task.
 # Developed in vscode with interactive features
 
-'''  steps
-- preset, including import, rand set
-- set opt, use argparse
-- prepare datasets and dataloader
-- train() 
-- test()
-
+'''  
 # p1
-- make the flow run
+- add checkpoint 
+
 
 # p9
-- add checkpoint
+- unify data
 
 
+# logs
+- v6 save last.pt and best.pt
 '''
 # %% preset
+
+
+
+import pandas as pd
 import numpy as np
 import argparse
 import json
@@ -36,11 +37,12 @@ from torch.utils.data import random_split
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-# from tqdm.notebook import tqdm
 from tqdm import tqdm
 from torch.optim import lr_scheduler
-from importlib import reload
+import util
 import ax
+from importlib import reload
+reload(util)
 reload(ax)
 import  itertools 
 import sys
@@ -54,6 +56,64 @@ logger = logging.getLogger(__name__)
 
 # %% functions
 
+
+
+def stop(msg='Stop here!'):
+    raise Exception(msg)
+
+def test(loader,
+    model,
+    testset = None,
+    is_training = 0,
+    is_savecsv = 0):
+    if is_training:
+        pass
+    else:
+        logger.info("Predicting test dataset...")
+
+    pred_list = []
+ 
+
+    model.eval()
+    with torch.no_grad():
+        for data in tqdm(loader):
+            images, labels,_ = data
+            images, labels  = images.to(device), labels.to(device)
+            outputs = model(images)
+            _, predicted = torch.max(outputs.data, 1)  # predicted is a batch tensor result
+            pred_list += predicted.tolist()
+
+
+    if is_savecsv:
+        fn_list = testset.get_filenames()
+        df = pd.DataFrame(columns=['filename','cid'])
+        df['filename'] = fn_list
+        df['cid'] = pred_list
+        unified_fp = './runs_t/prediction_{}.csv'.format(ax.nowtime())
+        df.to_csv(unified_fp, encoding='utf-8', index=False)
+        logger.info('Done! Check csv: '+ unified_fp )
+
+        # for _emoji only
+        csv_fp = "./runs_t/s_{}.csv".format(ax.nowtime())
+        map_fn2cid = dict(zip(fn_list, pred_list))
+        df = pd.read_csv('/content/02read/sample_submit.csv')
+        logger.info('Updaing _emoji df: '+ csv_fp )
+        for i in tqdm(df.index):
+            # print(i)
+            fn = df.iloc[i]['name']
+            cls_id =map_fn2cid[fn]
+            df.at[i, 'label'] = classes[cls_id]
+
+
+        df.to_csv(csv_fp, encoding='utf-8', index=False)
+        logger.info('done! check: '+ csv_fp )
+
+
+
+    return pred_list
+
+# rm
+# test(testloader,model,testset=raw_test,is_savecsv=1)
 
 def infer(loader,model,classes,batch_index = 0, num = 4 ):
   # test images in loader
@@ -99,7 +159,7 @@ class Emoji(VisionDataset):
     pkl_fp = '/content/_emoji/03save.pkl'
     classes = ('angry', 'disgusted', 'fearful',
             'happy', 'neutral', 'sad', 'surprised')
-
+    cls_names = classes
 
 
     def __init__(
@@ -143,9 +203,16 @@ class Emoji(VisionDataset):
         # print( img_np_list.shape)
         # print( 'img_np_list2 shape',img_np_list2.shape)
 
-        self.data = img_np_list2[:100]
-        self.filenames = fn_list[:100]
-        self.targets = label_id_list[:100]
+        
+        # slice = 100
+        # self.data = img_np_list2[:slice]
+        # self.filenames = fn_list[:slice]
+        # self.targets = label_id_list[:slice]
+
+        self.data = img_np_list2
+        self.filenames = fn_list
+        self.targets = label_id_list
+
 
     def __len__(self) -> int:
         return len(self.data)
@@ -216,29 +283,44 @@ parser.add_argument('--placeholder', type=str,
                     default='blank', help='initial weights path')
 opt = parser.parse_args(args=[])
 
-opt.batch = 16
+opt.batch = 512
 opt.split = 0.8
 opt.workers = 2
 opt.epochs = 3
-print(json.dumps(opt.__dict__, sort_keys=True))
+
+logger.info('[+]opt\n' + json.dumps(opt.__dict__, sort_keys=True) )
 
 split_dot = opt.split  
 workers = opt.workers
 batch_size = opt.batch
 epochs = opt.epochs
 
+# clean tqdm 
+try:
+    tqdm._instances.clear()
+except Exception:
+    pass
+
+
+
 # GPU info
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("ICH 🚀 v0.1 Using device: {}".format(device) )
+msg = "\n[+]device \nICH 🚀 v0.1 Using device: {}".format(device) 
 #Additional Info when using cuda
 if device.type == 'cuda':
-    print(torch.cuda.get_device_name(0))
-    print('Memory Usage:')
-    print('Allocated:', round(torch.cuda.memory_allocated(0)/1024**3,1), 'GB')
-    print('Cached:   ', round(torch.cuda.memory_reserved(0)/1024**3,1), 'GB')
+    msg = msg + " + "
+    msg = msg + torch.cuda.get_device_name(0)
+    msg +=  '\nGPU mem_allocated: {}GB, cached: {}GB'.format(
+        round(torch.cuda.memory_allocated(0)/1024**3,1),
+        round(torch.cuda.memory_reserved(0)/1024**3,1),
+    ) 
+
+logger.info(msg)
+
 
 
 # Prepare datasets
+logger.info('\n[+]load')
 transform = transforms.Compose(
     [transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
@@ -260,9 +342,10 @@ testloader = torch.utils.data.DataLoader(raw_test, batch_size=batch_size,
                                         shuffle=False, num_workers=workers)
 
 dataset_sizes ={'train':len(trainset),"val":len(validset)}
-print("Dataset loaded > split_dot:{}, train/test={}/{}, classes_count: {}, batch_size:{}".format(
+logger.info("Dataset info > split_dot:{}, train/test={}/{}, classes_count: {}, batch_size:{}".format(
     split_dot,len(raw_train),len(raw_test),len(classes),batch_size
 ))
+logger.info("Dataset loaded.")
 
 # Prepare Model
 model = Net()
@@ -270,23 +353,17 @@ model.to(device)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
-print('Model loaded.')
+logger.info('Model loaded.')
 
 
 
 
-# %% train
-
+# train
+logger.info('\n[+]train')
 logger.info('Starting training for {} epochs...'.format(epochs))
 since = time.time()
 best_model_wts = copy.deepcopy(model.state_dict())
 best_acc = 0.0
-
-
-try:
-    tqdm._instances.clear()
-except Exception:
-    pass
 
 
 for epoch in range(epochs):
@@ -375,38 +452,47 @@ for epoch in range(epochs):
         if phase == 'val' and epoch_acc > best_acc:
             best_acc = epoch_acc
             best_model_wts = copy.deepcopy(model.state_dict())
-        
-        
+
+ 
         # end phase ------------------------
 
     
  
     # end epoch -----------------------------
-
 time_elapsed = time.time() - since
 print('{} epochs complete in {:.0f}m {:.0f}s \n'.format(
     epochs, time_elapsed // 60, time_elapsed % 60))
 print('Best val Acc: {:4f}'.format(best_acc))
 
-# load best model weights
-model.load_state_dict(best_model_wts)
 
 
-PATH = '/content/_emoji/04model/v5_ich_{}.pth'.format(ax.nowtime())
+# Save model
+best_fp = './runs_t/v6_best_{}.pth'.format(ax.nowtime())
+last_fp = './runs_t/v6_last_{}.pth'.format(ax.nowtime())
 model.to('cpu')
-torch.save(model.state_dict(), PATH)
+torch.save(best_model_wts, best_fp)
+torch.save(model.state_dict(), last_fp)
 model.to(device)
-print('Finished Training! Model saved to ', PATH)
+print('Model saved to ', best_fp)
+print('Model saved to ', last_fp)
 
 
 
+# %% test
+logger.info('\n[+]test')
+model.load_state_dict(best_model_wts)
+test(testloader,model,testset=raw_test,is_savecsv=1)
 
-
-# test
+logger.info('end')
 
  
-#%% test
-infer(validloader,model,classes,3)
+
+ 
+#%% exp
+
+util.rm1()
+
+# infer(validloader,model,classes,3)
 
 
 
@@ -426,3 +512,4 @@ if __name__ == '__main__':
     opt = parser.parse_args(args=[])
 
     print(json.dumps(opt.__dict__, sort_keys=True))
+
